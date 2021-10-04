@@ -1,6 +1,6 @@
 # LilyGo-EPD-4-7-OWM-Weather-Display
 
-Open Weather Map weather station using [LilyGo EPD 4.7" display](https://bit.ly/3exI3Hb)
+Open Weather Map weather station using LilyGo EPD 4.7" display
 
 [![Presetation video](assets/001.png)](https://www.youtube.com/watch?v=TQaVQcld1Pk)
 
