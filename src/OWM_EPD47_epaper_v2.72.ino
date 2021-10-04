@@ -44,8 +44,10 @@ String  Date_str = "-- --- ----";
 int     wifi_signal, CurrentHour = 0, CurrentMin = 0, CurrentSec = 0, EventCnt = 0, vref = 1100;
 //################ PROGRAM VARIABLES and OBJECTS ##########################################
 #define max_readings 24 // Limited to 3-days here, but could go to 5-days = 40 as the data is issued  
+#define use_hourly_forecast true
 
 Forecast_record_type  WxConditions[1];
+Forecast_record_type  WxForecastHourly[max_readings];
 Forecast_record_type  WxForecast[max_readings];
 
 float pressure_readings[max_readings]    = {0};
@@ -55,7 +57,7 @@ float rain_readings[max_readings]        = {0};
 float snow_readings[max_readings]        = {0};
 
 long SleepDuration   = 60; // Sleep time in minutes, aligned to the nearest minute boundary, so if 30 will always update at 00 or 30 past the hour
-int  WakeupHour      = 8;  // Wakeup after 07:00 to save battery power
+int  WakeupHour      = 5;  // Wakeup after 07:00 to save battery power
 int  SleepHour       = 23; // Sleep  after 23:00 to save battery power
 long StartTime       = 0;
 long SleepTimer      = 0;
@@ -151,7 +153,7 @@ void setup() {
       bool RxForecast = false;
       WiFiClient client;   // wifi client object
       while ((RxWeather == false || RxForecast == false) && Attempts <= 2) { // Try up-to 2 time for Weather and Forecast data
-        if (RxWeather  == false) RxWeather  = obtainWeatherData(client, "onecall");
+        if (RxWeather  == false) RxWeather = obtainWeatherData(client, "onecall");
         if (RxForecast == false) RxForecast = obtainWeatherData(client, "forecast");
         Attempts++;
       }
@@ -173,6 +175,12 @@ void Convert_Readings_to_Imperial() { // Only the first 3-hours are used
   WxConditions[0].Pressure = hPa_to_inHg(WxConditions[0].Pressure);
   WxForecast[0].Rainfall   = mm_to_inches(WxForecast[0].Rainfall);
   WxForecast[0].Snowfall   = mm_to_inches(WxForecast[0].Snowfall);
+  WxForecastHourly[0].Rainfall   = mm_to_inches(WxForecastHourly[0].Rainfall);
+  WxForecastHourly[0].Snowfall   = mm_to_inches(WxForecastHourly[0].Snowfall);
+  WxForecastHourly[1].Rainfall   = mm_to_inches(WxForecastHourly[1].Rainfall);
+  WxForecastHourly[1].Snowfall   = mm_to_inches(WxForecastHourly[1].Snowfall);
+  WxForecastHourly[2].Rainfall   = mm_to_inches(WxForecastHourly[2].Rainfall);
+  WxForecastHourly[2].Snowfall   = mm_to_inches(WxForecastHourly[2].Snowfall);
 }
 
 bool DecodeWeather(WiFiClient& json, String Type) {
@@ -210,6 +218,30 @@ bool DecodeWeather(WiFiClient& json, String Type) {
     String Icon        = current_weather["icon"];                                  // "01n"
     WxConditions[0].Forecast0   = Description;                                     Serial.println("Fore: " + String(WxConditions[0].Forecast0));
     WxConditions[0].Icon        = Icon;                                            Serial.println("Icon: " + String(WxConditions[0].Icon));
+
+    Serial.print(F("\nReceiving Forecast period - ")); //------------------------------------------------
+    JsonArray list                    = root["hourly"];
+    for (byte r = 0; r < max_readings; r++) {
+      Serial.println("\nPeriod-" + String(r) + "--------------");
+      WxForecastHourly[r].Dt                = list[r]["dt"].as<int>();
+      WxForecastHourly[r].Temperature       = list[r]["temp"].as<float>();       Serial.println("Temp: " + String(WxForecastHourly[r].Temperature));
+      // WxForecastHourly[r].Low               = list[r]["main"]["temp_min"].as<float>();   Serial.println("TLow: " + String(WxForecastHourly[r].Low));
+      // WxForecastHourly[r].High              = list[r]["main"]["temp_max"].as<float>();   Serial.println("THig: " + String(WxForecastHourly[r].High));
+      WxForecastHourly[r].Pressure          = list[r]["pressure"].as<float>();   Serial.println("Pres: " + String(WxForecastHourly[r].Pressure));
+      WxForecastHourly[r].Humidity          = list[r]["humidity"].as<float>();   Serial.println("Humi: " + String(WxForecastHourly[r].Humidity));
+      WxForecastHourly[r].Icon              = list[r]["weather"][0]["icon"].as<char*>(); Serial.println("Icon: " + String(WxForecastHourly[r].Icon));
+      WxForecastHourly[r].Rainfall          = list[r]["rain"]["1h"].as<float>();         Serial.println("Rain: " + String(WxForecastHourly[r].Rainfall));
+      WxForecastHourly[r].Snowfall          = list[r]["snow"]["1h"].as<float>();         Serial.println("Snow: " + String(WxForecastHourly[r].Snowfall));
+    }
+    //------------------------------------------
+    float pressure_trend = WxForecastHourly[0].Pressure - WxForecastHourly[2].Pressure; // Measure pressure slope between ~now and later
+    pressure_trend = ((int)(pressure_trend * 10)) / 10.0; // Remove any small variations less than 0.1
+    WxConditions[0].Trend = "=";
+    if (pressure_trend > 0)  WxConditions[0].Trend = "+";
+    if (pressure_trend < 0)  WxConditions[0].Trend = "-";
+    if (pressure_trend == 0) WxConditions[0].Trend = "0";
+
+    if (Units == "I") Convert_Readings_to_Imperial();
   }
   if (Type == "forecast") {
     //Serial.println(json);
@@ -231,14 +263,6 @@ bool DecodeWeather(WiFiClient& json, String Type) {
         if (WxForecast[r].Low  < WxConditions[0].Low)  WxConditions[0].Low  = WxForecast[r].Low;  // Get Lowest  temperature for next 24Hrs
       }
     }
-    //------------------------------------------
-    float pressure_trend = WxForecast[0].Pressure - WxForecast[2].Pressure; // Measure pressure slope between ~now and later
-    pressure_trend = ((int)(pressure_trend * 10)) / 10.0; // Remove any small variations less than 0.1
-    WxConditions[0].Trend = "=";
-    if (pressure_trend > 0)  WxConditions[0].Trend = "+";
-    if (pressure_trend < 0)  WxConditions[0].Trend = "-";
-    if (pressure_trend == 0) WxConditions[0].Trend = "0";
-
     if (Units == "I") Convert_Readings_to_Imperial();
   }
   return true;
@@ -264,7 +288,7 @@ bool obtainWeatherData(WiFiClient & client, const String & RequestType) {
   HTTPClient http;
   //api.openweathermap.org/data/2.5/RequestType?lat={lat}&lon={lon}&appid={API key}
   String uri = "/data/2.5/" + RequestType + "?lat=" + Latitude + "&lon=" + Longitude + "&appid=" + apikey + "&mode=json&units=" + units + "&lang=" + Language;
-  if (RequestType == "onecall") uri += "&exclude=minutely,hourly,alerts,daily";
+  // if (RequestType == "onecall") uri += "&exclude=minutely,hourly,alerts,daily";
   http.begin(client, server, 80, uri); //http.begin(uri,test_root_ca); //HTTPS example connection
   int httpCode = http.GET();
   if (httpCode == HTTP_CODE_OK) {
@@ -458,12 +482,16 @@ void Display_UVIndexLevel(int x, int y, float UVI) {
   DrawUVI(x - 10, y - 5);
 }
 
-void DisplayForecastWeather(int x, int y, int index, int fwidth) {
+void DisplayForecastWeather(int x, int y, int index, int fwidth, bool hourly) {
   x = x + fwidth * index;
-  DisplayConditionsSection(x + fwidth / 2 - 5, y + 85, WxForecast[index].Icon, SmallIcon);
+  DisplayConditionsSection(x + fwidth / 2 - 5, y + 85, hourly ? WxForecastHourly[index].Icon : WxForecast[index].Icon, SmallIcon);
   setFont(OpenSans10B);
-  drawString(x + fwidth / 2, y + 30, String(ConvertUnixTime(WxForecast[index].Dt + WxConditions[0].FTimezone).substring(0, 5)), CENTER);
-  drawString(x + fwidth / 2, y + 130, String(WxForecast[index].High, 0) + "°/" + String(WxForecast[index].Low, 0) + "°", CENTER);
+    drawString(x + fwidth / 2, y + 30, String(ConvertUnixTime( ( hourly ? WxForecastHourly[index].Dt : WxForecast[index].Dt ) /*+ WxConditions[0].FTimezone */).substring(0, 5)), CENTER);
+  if (hourly) {
+    drawString(x + fwidth / 2, y + 125, String(WxForecastHourly[index].Temperature, 0) + "°", CENTER);
+  } else {
+    drawString(x + fwidth / 2, y + 125, String(WxForecast[index].High, 0) + "°/" + String(WxForecast[index].Low, 0) + "°", CENTER);
+  }
 }
 
 double NormalizedMoonPhase(int d, int m, int y) {
@@ -553,7 +581,7 @@ String MoonPhase(int d, int m, int y, String hemisphere) {
 void DisplayForecastSection(int x, int y) {
   int f = 0;
   do {
-    DisplayForecastWeather(x, y, f, 82); // x,y cordinates, forecatsr number, spacing width
+    DisplayForecastWeather(x, y, f, 82, use_hourly_forecast); // x,y cordinates, forecatsr number, spacing width
     f++;
   } while (f < 8);
 }
